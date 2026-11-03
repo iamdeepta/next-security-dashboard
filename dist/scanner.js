@@ -848,6 +848,7 @@ export async function scanDependencies(appRoot, options = {}) {
             a.packageName.localeCompare(b.packageName)),
         counts,
         headers: null,
+        appSecurity: null,
         ...(error ? { error } : {}),
     };
 }

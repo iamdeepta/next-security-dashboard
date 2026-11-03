@@ -1,13 +1,20 @@
+import { analyzeAppSecurity } from './analyzer.js';
 import { fetchAndAnalyzeHeaders } from './headers.js';
 import { scanDependencies } from './scanner.js';
 import type { ScanOptions } from './scanner.js';
-import type { HeadersResult, SecurityReport } from './types.js';
+import type { AppSecurityReport, HeadersResult, SecurityReport } from './types.js';
 
 export interface HandlerOptions extends ScanOptions {
   /** Cache the scan result in memory for this many ms. Defaults to 60000. */
   cacheTtlMs?: number;
   /** Whether to fetch and analyse the app's own security headers. Defaults to true. */
   includeHeaders?: boolean;
+  /**
+   * Whether to analyse the host app itself (source scan for XSS/injection
+   * patterns, cookie flags, exposed secrets, plus runtime checks for
+   * version exposure, framing, cookies and source maps). Defaults to true.
+   */
+  includeAppChecks?: boolean;
   /**
    * Optional authorization gate. The scan exposes dependency and header
    * details, so in production you should protect this route, e.g.:
@@ -43,6 +50,7 @@ export function createSecurityHandler(options: HandlerOptions = {}) {
   const {
     cacheTtlMs = 60000,
     includeHeaders = true,
+    includeAppChecks = true,
     authorize,
     ...scanOptions
   } = options;
@@ -93,6 +101,26 @@ export function createSecurityHandler(options: HandlerOptions = {}) {
           error: `Header check failed: ${message}`,
         };
         report.headers = fallback;
+      }
+    }
+
+    if (includeAppChecks) {
+      try {
+        report.appSecurity = await analyzeAppSecurity(appRoot, {
+          origin: deriveOrigin(request, requestUrl),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const fallback: AppSecurityReport = {
+          checkedAt: new Date().toISOString(),
+          appRoot,
+          origin: deriveOrigin(request, requestUrl),
+          filesScanned: 0,
+          checks: [],
+          counts: { pass: 0, warn: 0, fail: 0, na: 0 },
+          error: `App security analysis failed: ${message}`,
+        };
+        report.appSecurity = fallback;
       }
     }
 

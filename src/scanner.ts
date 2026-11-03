@@ -998,6 +998,7 @@ export async function scanDependencies(
     ),
     counts,
     headers: null,
+    appSecurity: null,
     ...(error ? { error } : {}),
   };
 }

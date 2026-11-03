@@ -363,6 +363,24 @@
 .nsd-badge-header-warning { background: var(--nsd-warn-bg); color: var(--nsd-warn); }
 .nsd-badge-header-missing { background: var(--nsd-bad-bg); color: var(--nsd-bad); }
 .nsd-badge-header-na { background: var(--nsd-surface-2); color: var(--nsd-muted); }
+.nsd-badge-app-pass { background: var(--nsd-ok-bg); color: var(--nsd-ok); }
+.nsd-badge-app-warn { background: var(--nsd-warn-bg); color: var(--nsd-warn); }
+.nsd-badge-app-fail { background: var(--nsd-bad-bg); color: var(--nsd-bad); }
+.nsd-badge-app-na { background: var(--nsd-surface-2); color: var(--nsd-muted); }
+.nsd-check-evidence {
+  margin: 6px 0;
+  padding-left: 18px;
+  color: var(--nsd-muted);
+  font-size: 13px;
+  word-break: break-all;
+}
+.nsd-check-loc {
+  margin: 8px 0 0;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 .nsd-tag {
   display: inline-block;

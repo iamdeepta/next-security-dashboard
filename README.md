@@ -14,6 +14,14 @@ wire up two small files, and visiting `/security` shows:
   Referrer-Policy and Permissions-Policy, each with its real value, a
   plain-language explanation, an overall score, and a ready-to-paste
   `next.config.js` fix snippet.
+- **Host-app security analysis** — a static scan of the app's own source
+  for XSS/injection patterns (`dangerouslySetInnerHTML`, `innerHTML`,
+  `eval`, `javascript:` links, `target="_blank"` without `noopener`),
+  cookie flags, `NEXT_PUBLIC_` secrets and the `poweredByHeader` setting,
+  plus runtime checks of the running app: framework/server version
+  exposure, iframe framing (clickjacking), cookie `Secure`/`HttpOnly`/
+  `SameSite` flags, public source maps and generator meta tags. Every
+  finding names the file and line and ships a fix.
 
 The UI ships its own namespaced CSS (`nsd-*` classes) — **no Tailwind
 required** in the host app — and includes search, severity/direct/prod-dev
@@ -81,6 +89,7 @@ demand. `?fresh=1` on the API URL bypasses the 60-second in-memory cache.
 export const GET = createSecurityHandler({
   cacheTtlMs: 60_000,        // in-memory cache TTL
   includeHeaders: true,      // also audit the app's own response headers
+  includeAppChecks: true,    // also analyse the host app's own source + runtime behaviour
   auditTimeoutMs: 120_000,   // timeout for `npm audit`
   enableOsvFallback: true,   // fall back to OSV.dev when npm audit fails
   enableSafeUpgradeLookup: true, // list every safe upgrade version (registry lookup)
@@ -165,6 +174,34 @@ import { scanDependencies, analyzeHeaders } from 'next-security-dashboard';
 const report = await scanDependencies('/path/to/app');
 console.log(report.counts, report.vulnerabilities[0]?.safeUpgradeOptions);
 ```
+
+## Host-app security analysis
+
+`analyzeAppSecurity(appRoot, { origin })` (also run automatically by the
+route handler, which passes the request origin) checks the app itself:
+
+**Static source scan** (up to 400 source files under the app root, excluding
+`node_modules`, `.next`, `dist` and `public`). Each pattern is a heuristic —
+review every finding before changing code:
+
+| Check | What it flags |
+| --- | --- |
+| `dangerouslySetInnerHTML` | Raw HTML inserted into the page (XSS if user-controlled) |
+| `innerHTML` / `document.write` | Direct DOM HTML writes bypassing React's escaping |
+| `eval` / `new Function` | Strings executed as code |
+| `javascript:` links | Links that run script on click |
+| `document.cookie` writes | Cookies set from JavaScript (cannot be `HttpOnly`) |
+| `cookies().set(…)` flags | Server cookies missing `httpOnly` / `secure` |
+| `NEXT_PUBLIC_*` secrets | Variables whose names look like secrets, inlined into the browser bundle |
+| `target="_blank"` | Links without `rel="noopener"` (tabnabbing) |
+| `poweredByHeader` | `next.config` not disabling the `X-Powered-By` header |
+
+**Runtime checks** (against the running app's origin): framework/server
+version headers, iframe framing, cookie flags on `Set-Cookie` responses,
+publicly reachable JavaScript source maps, and generator meta tags. When no
+origin is available (programmatic use without a request URL) these report
+N/A. Findings carry file/line locations, evidence and a fix; the dashboard
+shows them on the **App security** tab.
 
 ## Limitations
 

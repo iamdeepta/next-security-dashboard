@@ -102,6 +102,48 @@ export interface HeadersResult {
   error?: string;
 }
 
+export type AppCheckStatus = 'pass' | 'warn' | 'fail' | 'na';
+
+export type AppCheckCategory = 'injection' | 'cookies' | 'exposure' | 'framing' | 'config';
+
+export interface AppCheckLocation {
+  /** Path relative to the app root, e.g. "app/page.tsx". */
+  file: string;
+  line: number;
+  /** The matching source line, trimmed. */
+  snippet: string;
+}
+
+export interface AppCheck {
+  /** Stable id, e.g. "dangerous-html" or "runtime-framing". */
+  id: string;
+  category: AppCheckCategory;
+  title: string;
+  status: AppCheckStatus;
+  /** Severity when the check fails or warns, null for pass/na. */
+  severity: Severity | null;
+  /** One-line plain-language summary of the result. */
+  summary: string;
+  /** Short observed facts supporting the result (header values, counts). */
+  evidence: string[];
+  /** How to fix the issue, or how to keep the passing state. */
+  fix: string;
+  /** Source locations for static findings (empty for runtime checks). */
+  locations: AppCheckLocation[];
+}
+
+export interface AppSecurityReport {
+  checkedAt: string;
+  appRoot: string;
+  /** Origin the runtime checks ran against, or null when unavailable. */
+  origin: string | null;
+  filesScanned: number;
+  checks: AppCheck[];
+  counts: { pass: number; warn: number; fail: number; na: number };
+  /** Set when the runtime checks could not run (e.g. origin unreachable). */
+  error?: string;
+}
+
 export interface ScanError {
   code: string;
   message: string;
@@ -127,5 +169,7 @@ export interface SecurityReport {
     fixable: number;
   };
   headers: HeadersResult | null;
+  /** Host-app security analysis (source scan + runtime checks), or null when not run. */
+  appSecurity: AppSecurityReport | null;
   error?: ScanError;
 }

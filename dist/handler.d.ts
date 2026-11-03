@@ -5,6 +5,12 @@ export interface HandlerOptions extends ScanOptions {
     /** Whether to fetch and analyse the app's own security headers. Defaults to true. */
     includeHeaders?: boolean;
     /**
+     * Whether to analyse the host app itself (source scan for XSS/injection
+     * patterns, cookie flags, exposed secrets, plus runtime checks for
+     * version exposure, framing, cookies and source maps). Defaults to true.
+     */
+    includeAppChecks?: boolean;
+    /**
      * Optional authorization gate. The scan exposes dependency and header
      * details, so in production you should protect this route, e.g.:
      *   authorize: (req) => req.headers.get('x-admin-secret') === process.env.ADMIN_SECRET

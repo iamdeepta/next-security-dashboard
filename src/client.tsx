@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HeaderStatus, PackageInfo, SafeUpgradeOption, SecurityReport, Severity, Vulnerability } from './types.js';
+import type { AppCheckStatus, HeaderStatus, PackageInfo, SafeUpgradeOption, SecurityReport, Severity, Vulnerability } from './types.js';
 import { SEVERITY_ORDER } from './types.js';
 
 export interface SecurityDashboardProps {
@@ -13,7 +13,7 @@ export interface SecurityDashboardProps {
   initialReport?: SecurityReport;
 }
 
-type Tab = 'vulns' | 'packages' | 'headers';
+type Tab = 'vulns' | 'packages' | 'headers' | 'appsec';
 
 const ALL_SEVERITIES: Severity[] = ['critical', 'high', 'moderate', 'low'];
 
@@ -119,6 +119,16 @@ function HeaderStatusBadge({ status }: { status: HeaderStatus }) {
     na: 'N/A',
   };
   return <span className={`nsd-badge nsd-badge-header-${status}`}>{labels[status]}</span>;
+}
+
+function AppCheckBadge({ status }: { status: AppCheckStatus }) {
+  const labels: Record<AppCheckStatus, string> = {
+    pass: 'Pass',
+    warn: 'Warning',
+    fail: 'Fail',
+    na: 'N/A',
+  };
+  return <span className={`nsd-badge nsd-badge-app-${status}`}>{labels[status]}</span>;
 }
 
 function Donut({ counts }: { counts: SecurityReport['counts'] }) {
@@ -487,6 +497,16 @@ export function SecurityDashboard({
               onClick={() => setTab('headers')}
             >
               Security headers
+            </button>
+            <button
+              type="button"
+              className={tab === 'appsec' ? 'nsd-tab nsd-tab-active' : 'nsd-tab'}
+              onClick={() => setTab('appsec')}
+            >
+              App security
+              {report.appSecurity
+                ? ` (${report.appSecurity.counts.fail + report.appSecurity.counts.warn})`
+                : ''}
             </button>
           </nav>
 
@@ -878,6 +898,82 @@ export function SecurityDashboard({
                             <CopyButton text={check.fixSnippet} label="Copy snippet" />
                           </details>
                         )}
+                      </article>
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
+          {tab === 'appsec' && (
+            <section aria-label="App security">
+              {!report.appSecurity ? (
+                <div className="nsd-error" role="alert">
+                  <strong>App security analysis was not run.</strong> Enable it with the
+                  handler option <code className="nsd-mono">includeAppChecks: true</code>.
+                </div>
+              ) : (
+                <>
+                  {report.appSecurity.error && (
+                    <div className="nsd-notice" role="status">
+                      <strong>Note:</strong> {report.appSecurity.error}
+                    </div>
+                  )}
+                  <div className="nsd-headers-meta">
+                    <span>
+                      Scanned <strong>{report.appSecurity.filesScanned}</strong> source
+                      file(s) · {report.appSecurity.counts.pass} passed,{' '}
+                      {report.appSecurity.counts.warn} warnings,{' '}
+                      {report.appSecurity.counts.fail} failures
+                    </span>
+                    <span className="nsd-muted">
+                      Static findings are heuristics — review each one. Runtime checks ran
+                      against {report.appSecurity.origin ?? 'no origin'}.
+                    </span>
+                  </div>
+                  <div className="nsd-header-cards">
+                    {report.appSecurity.checks.map((check) => (
+                      <article key={check.id} className="nsd-header-card">
+                        <div className="nsd-header-card-top">
+                          <h3 className="nsd-header-card-name">{check.title}</h3>
+                          <span>
+                            <AppCheckBadge status={check.status} />{' '}
+                            {check.severity && <SeverityBadge severity={check.severity} />}
+                          </span>
+                        </div>
+                        <p className="nsd-header-card-expl">{check.summary}</p>
+                        <p>
+                          <span className="nsd-tag">{check.category}</span>
+                        </p>
+                        {check.evidence.length > 0 && (
+                          <ul className="nsd-check-evidence">
+                            {check.evidence.map((e, i) => (
+                              <li key={i}>
+                                <code className="nsd-mono">{e}</code>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {check.locations.length > 0 && (
+                          <div className="nsd-check-loc">
+                            {check.locations.map((l) => (
+                              <div key={`${l.file}:${l.line}`}>
+                                <code className="nsd-mono">
+                                  {l.file}:{l.line}
+                                </code>{' '}
+                                <code className="nsd-mono nsd-code-chip">{l.snippet}</code>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <details className="nsd-fix-details">
+                          <summary>How to fix</summary>
+                          <pre className="nsd-code">
+                            <code>{check.fix}</code>
+                          </pre>
+                          <CopyButton text={check.fix} label="Copy fix" />
+                        </details>
                       </article>
                     ))}
                   </div>

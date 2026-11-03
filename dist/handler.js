@@ -1,3 +1,4 @@
+import { analyzeAppSecurity } from './analyzer.js';
 import { fetchAndAnalyzeHeaders } from './headers.js';
 import { scanDependencies } from './scanner.js';
 function deriveOrigin(request, requestUrl) {
@@ -22,7 +23,7 @@ function deriveOrigin(request, requestUrl) {
  * GET returns the JSON security report. Add `?fresh=1` to bypass the cache.
  */
 export function createSecurityHandler(options = {}) {
-    const { cacheTtlMs = 60000, includeHeaders = true, authorize, ...scanOptions } = options;
+    const { cacheTtlMs = 60000, includeHeaders = true, includeAppChecks = true, authorize, ...scanOptions } = options;
     let cached = null;
     return async function GET(request) {
         if (authorize) {
@@ -65,6 +66,26 @@ export function createSecurityHandler(options = {}) {
                     error: `Header check failed: ${message}`,
                 };
                 report.headers = fallback;
+            }
+        }
+        if (includeAppChecks) {
+            try {
+                report.appSecurity = await analyzeAppSecurity(appRoot, {
+                    origin: deriveOrigin(request, requestUrl),
+                });
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                const fallback = {
+                    checkedAt: new Date().toISOString(),
+                    appRoot,
+                    origin: deriveOrigin(request, requestUrl),
+                    filesScanned: 0,
+                    checks: [],
+                    counts: { pass: 0, warn: 0, fail: 0, na: 0 },
+                    error: `App security analysis failed: ${message}`,
+                };
+                report.appSecurity = fallback;
             }
         }
         cached = { at: Date.now(), report };
