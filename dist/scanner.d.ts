@@ -6,5 +6,12 @@ export interface ScanOptions {
     auditTimeoutMs?: number;
     /** When npm audit fails, fall back to the OSV.dev API. Defaults to true. */
     enableOsvFallback?: boolean;
+    /**
+     * Look up published versions on the npm registry to list every safe
+     * upgrade option per vulnerability. Defaults to true. When disabled
+     * (or the registry is unreachable) only the patched versions known
+     * from the advisories are listed.
+     */
+    enableSafeUpgradeLookup?: boolean;
 }
 export declare function scanDependencies(appRoot: string, options?: ScanOptions): Promise<SecurityReport>;

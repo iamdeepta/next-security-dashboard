@@ -17,6 +17,15 @@ export interface AdvisoryInfo {
     /** Where this advisory came from: 'npm-audit' or 'osv.dev'. */
     source: string;
 }
+export interface SafeUpgradeOption {
+    /** A published version that fixes every known advisory for this package. */
+    version: string;
+    /**
+     * Why this version is listed, e.g. "Smallest fix", "Latest patch",
+     * "Latest in v14", or "Latest".
+     */
+    label: string;
+}
 export interface Vulnerability {
     packageName: string;
     installedVersion: string;
@@ -35,6 +44,15 @@ export interface Vulnerability {
     patchedVersions: string[];
     /** Minimal version that fixes it, or null when no patched version is known. */
     recommendedUpgrade: string | null;
+    /**
+     * Every safe version the user can upgrade to, curated from the npm
+     * registry: the smallest fix, the latest safe patch/minor within the
+     * installed major line, and the latest safe version overall. Empty
+     * when no safe version is known. The first entry is the recommended
+     * (smallest) upgrade. Falls back to the known patched versions when
+     * the registry cannot be reached.
+     */
+    safeUpgradeOptions: SafeUpgradeOption[];
     /** Exact command to apply the recommended upgrade, or null. */
     fixCommand: string | null;
     /** Whether any fix is available at all. */

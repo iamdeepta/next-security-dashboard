@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HeaderStatus, PackageInfo, SecurityReport, Severity, Vulnerability } from './types.js';
+import type { HeaderStatus, PackageInfo, SafeUpgradeOption, SecurityReport, Severity, Vulnerability } from './types.js';
 import { SEVERITY_ORDER } from './types.js';
 
 export interface SecurityDashboardProps {
@@ -89,6 +89,25 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
 function SeverityBadge({ severity }: { severity: Severity }) {
   return (
     <span className={`nsd-badge nsd-badge-${severity}`}>{severityLabel(severity)}</span>
+  );
+}
+
+function SafeUpgradeChips({ options }: { options: SafeUpgradeOption[] }) {
+  if (options.length === 0) return null;
+  return (
+    <span className="nsd-safe-chips">
+      {options.map((opt, i) => (
+        <code
+          key={opt.version}
+          className={
+            i === 0 ? 'nsd-mono nsd-safe-chip nsd-safe-chip-rec' : 'nsd-mono nsd-safe-chip'
+          }
+          title={opt.label}
+        >
+          {i === 0 ? `★ ${opt.version}` : opt.version}
+        </code>
+      ))}
+    </span>
   );
 }
 
@@ -288,6 +307,7 @@ export function SecurityDashboard({
       'Vulnerable range',
       'Patched versions',
       'Recommended upgrade',
+      'Safe upgrade options',
       'Fix command',
     ];
     const rows = report.vulnerabilities.map((v: Vulnerability) => {
@@ -306,6 +326,7 @@ export function SecurityDashboard({
         v.vulnerableRange,
         v.patchedVersions.join(' '),
         v.recommendedUpgrade ?? '',
+        v.safeUpgradeOptions.map((o) => o.version).join(' '),
         v.fixCommand ?? '',
       ]
         .map(csvCell)
@@ -552,7 +573,7 @@ export function SecurityDashboard({
                         <th>Severity</th>
                         <th>Type</th>
                         <th>Advisory</th>
-                        <th>Recommended upgrade</th>
+                        <th>Safe upgrades</th>
                         <th aria-label="Expand" />
                       </tr>
                     </thead>
@@ -582,7 +603,9 @@ export function SecurityDashboard({
                               ) : null}
                             </td>
                             <td>
-                              {v.recommendedUpgrade ? (
+                              {v.safeUpgradeOptions.length > 0 ? (
+                                <SafeUpgradeChips options={v.safeUpgradeOptions} />
+                              ) : v.recommendedUpgrade ? (
                                 <code className="nsd-mono">{v.recommendedUpgrade}</code>
                               ) : v.fixAvailable ? (
                                 <span className="nsd-muted">via npm audit fix</span>
@@ -610,6 +633,23 @@ export function SecurityDashboard({
                                       <dt>Vulnerable range</dt>
                                       <dd>
                                         <code className="nsd-mono">{v.vulnerableRange || '—'}</code>
+                                      </dd>
+                                    </div>
+                                    <div>
+                                      <dt>Safe upgrade options</dt>
+                                      <dd>
+                                        {v.safeUpgradeOptions.length ? (
+                                          v.safeUpgradeOptions.map((opt) => (
+                                            <span key={opt.version} className="nsd-safe-opt">
+                                              <code className="nsd-mono nsd-code-chip">
+                                                {opt.version}
+                                              </code>
+                                              <span className="nsd-muted">{opt.label}</span>
+                                            </span>
+                                          ))
+                                        ) : (
+                                          <span className="nsd-muted">none known</span>
+                                        )}
                                       </dd>
                                     </div>
                                     <div>

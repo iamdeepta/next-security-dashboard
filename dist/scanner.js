@@ -45,6 +45,11 @@ function minimalFix(installed, fixed) {
     greater.sort(compareSemver);
     return greater[0];
 }
+/** True when the version is a plain x.y.z release (no prerelease suffix). */
+function isReleaseVersion(v) {
+    const clean = v.trim().replace(/^[v= ]+/, '');
+    return /^\d+\.\d+\.\d+$/.test(clean);
+}
 function severityFromScore(score) {
     if (score == null || Number.isNaN(score))
         return 'moderate';
@@ -319,6 +324,7 @@ function parseAuditReport(report, inventory) {
                 : advisories[0]?.range ?? '',
             patchedVersions,
             recommendedUpgrade,
+            safeUpgradeOptions: [],
             fixCommand,
             fixAvailable,
         });
@@ -326,13 +332,14 @@ function parseAuditReport(report, inventory) {
     return result;
 }
 /**
- * OSV.dev transport: global fetch first (works in normal deployments),
- * then the `curl` binary as a fallback — curl honours HTTP(S)_PROXY env
- * vars, while Node's fetch/undici does not reliably do so in proxied
- * sandboxes, where the direct request hangs until timeout.
+ * Shared JSON transport for OSV.dev and the npm registry: global fetch
+ * first (works in normal deployments), then the `curl` binary as a
+ * fallback — curl honours HTTP(S)_PROXY env vars, while Node's
+ * fetch/undici does not reliably do so in proxied sandboxes, where the
+ * direct request hangs until timeout.
  * Returns null when the request could not be completed at all.
  */
-async function osvFetchJson(url, body) {
+async function fetchJsonWithFallback(url, body) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20000);
     try {
@@ -392,7 +399,7 @@ async function queryOsvBatch(queries) {
                 version: q.version,
             })),
         });
-        const parsed = await osvFetchJson('https://api.osv.dev/v1/querybatch', body);
+        const parsed = await fetchJsonWithFallback('https://api.osv.dev/v1/querybatch', body);
         if (!parsed)
             continue;
         anySuccess = true;
@@ -414,7 +421,7 @@ async function fetchOsvVulnDetails(ids) {
         const chunk = unique.slice(i, i + CONCURRENCY);
         const settled = await Promise.all(chunk.map(async (id) => ({
             id,
-            detail: await osvFetchJson(`https://api.osv.dev/v1/vulns/${encodeURIComponent(id)}`),
+            detail: await fetchJsonWithFallback(`https://api.osv.dev/v1/vulns/${encodeURIComponent(id)}`),
         })));
         for (const { id, detail } of settled) {
             if (detail)
@@ -536,6 +543,7 @@ function osvVulnToVulnerability(entry, vuln, inventory) {
         vulnerableRange: displayRange,
         patchedVersions: [...new Set(fixedVersions)].sort(compareSemver),
         recommendedUpgrade: recommended,
+        safeUpgradeOptions: [],
         fixCommand: recommended ? `npm install ${entry.name}@${recommended}` : null,
         fixAvailable: recommended !== null,
     };
@@ -592,6 +600,7 @@ async function scanWithOsv(inventory) {
                     vulnerableRange: '',
                     patchedVersions: [],
                     recommendedUpgrade: null,
+                    safeUpgradeOptions: [],
                     fixCommand: null,
                     fixAvailable: false,
                 });
@@ -625,6 +634,128 @@ async function scanWithOsv(inventory) {
         }
     }
     return [...merged.values()];
+}
+function registryEscapeName(name) {
+    if (name.startsWith('@')) {
+        const slash = name.indexOf('/');
+        if (slash > 0) {
+            return `${encodeURIComponent(name.slice(0, slash))}%2f${encodeURIComponent(name.slice(slash + 1))}`;
+        }
+    }
+    return encodeURIComponent(name);
+}
+async function fetchRegistryVersions(name) {
+    const doc = await fetchJsonWithFallback(`https://registry.npmjs.org/${registryEscapeName(name)}`);
+    if (!doc || !doc.versions)
+        return null;
+    const deprecated = new Set();
+    const versions = [];
+    for (const [version, meta] of Object.entries(doc.versions)) {
+        versions.push(version);
+        if (meta && typeof meta.deprecated === 'string' && meta.deprecated) {
+            deprecated.add(version);
+        }
+    }
+    return { versions, deprecated };
+}
+/**
+ * Curate the safe upgrade options from every published version: the
+ * smallest version that fixes all advisories, the latest safe patch
+ * within the installed minor line, the latest safe version within the
+ * installed major line, and the latest safe version overall. A version
+ * counts as safe when it is at or above the fix floor (the highest
+ * known patched version), above the installed version, a plain
+ * release, and not deprecated.
+ */
+function computeSafeOptions(installed, floor, published, deprecated) {
+    const candidates = published
+        .filter((v) => isReleaseVersion(v) && !deprecated.has(v))
+        .filter((v) => compareSemver(v, floor) >= 0 && compareSemver(v, installed) > 0)
+        .sort(compareSemver);
+    if (candidates.length === 0)
+        return [];
+    const [major, minor] = parseSemver(installed);
+    const lastWith = (pred) => {
+        let best = null;
+        for (const v of candidates)
+            if (pred(v))
+                best = v;
+        return best;
+    };
+    const minimal = candidates[0];
+    const latestPatch = lastWith((v) => {
+        const [ma, mi] = parseSemver(v);
+        return ma === major && mi === minor;
+    });
+    const latestMinor = lastWith((v) => parseSemver(v)[0] === major);
+    const latest = candidates[candidates.length - 1];
+    const picks = [{ version: minimal, label: 'Smallest fix' }];
+    if (latestPatch && latestPatch !== minimal) {
+        picks.push({ version: latestPatch, label: 'Latest patch' });
+    }
+    if (latestMinor && latestMinor !== minimal && latestMinor !== latestPatch) {
+        picks.push({ version: latestMinor, label: `Latest in v${major}` });
+    }
+    if (latest !== minimal && latest !== latestPatch && latest !== latestMinor) {
+        picks.push({ version: latest, label: 'Latest' });
+    }
+    const seen = new Set();
+    const options = picks
+        .filter((p) => (seen.has(p.version) ? false : (seen.add(p.version), true)))
+        .sort((a, b) => compareSemver(a.version, b.version));
+    if (options.length === 1)
+        options[0].label = 'Recommended';
+    return options;
+}
+/** Offline fallback: the patched versions known from the advisories. */
+function fallbackSafeOptions(vuln) {
+    const fixed = [...new Set(vuln.patchedVersions)]
+        .filter((v) => {
+        try {
+            return compareSemver(v, vuln.installedVersion) > 0;
+        }
+        catch {
+            return false;
+        }
+    })
+        .sort(compareSemver);
+    return fixed.map((version, i) => ({
+        version,
+        label: i === 0 ? 'Smallest fix' : 'Patched version',
+    }));
+}
+async function enrichWithSafeUpgrades(vulns, enableLookup) {
+    // Fallback options first, so every row lists something even when the
+    // registry cannot be reached.
+    for (const v of vulns)
+        v.safeUpgradeOptions = fallbackSafeOptions(v);
+    if (!enableLookup)
+        return;
+    const CONCURRENCY = 4;
+    for (let i = 0; i < vulns.length; i += CONCURRENCY) {
+        const chunk = vulns.slice(i, i + CONCURRENCY);
+        await Promise.all(chunk.map(async (v) => {
+            const floor = maxSemver(v.patchedVersions) ?? v.recommendedUpgrade;
+            if (!floor)
+                return;
+            let registry = null;
+            try {
+                registry = await fetchRegistryVersions(v.packageName);
+            }
+            catch {
+                registry = null;
+            }
+            if (!registry)
+                return;
+            const options = computeSafeOptions(v.installedVersion, floor, registry.versions, registry.deprecated);
+            if (options.length === 0)
+                return;
+            v.safeUpgradeOptions = options;
+            // The recommended upgrade is the smallest safe version.
+            v.recommendedUpgrade = options[0].version;
+            v.fixCommand = `npm install ${v.packageName}@${options[0].version}`;
+        }));
+    }
 }
 /* ------------------------------------------------------------------ */
 /* Public entry point                                                  */
@@ -680,6 +811,7 @@ export async function scanDependencies(appRoot, options = {}) {
         list.push(v.severity);
         vulnByName.set(v.packageName, list);
     }
+    await enrichWithSafeUpgrades(vulnerabilities, options.enableSafeUpgradeLookup ?? true);
     const packages = inventory.entries.map((e) => {
         const sevs = vulnByName.get(e.name) ?? [];
         return {

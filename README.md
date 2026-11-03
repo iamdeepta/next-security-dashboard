@@ -5,8 +5,10 @@ wire up two small files, and visiting `/security` shows:
 
 - **Every installed package** — name, version, direct vs transitive, prod vs dev.
 - **Every known vulnerability** — severity, advisory title, CVE/GHSA links,
-  vulnerable range, patched versions, the **minimal upgrade that fixes it**,
-  and the exact `npm install <pkg>@<version>` fix command.
+  vulnerable range, patched versions, **every safe upgrade version**
+  (smallest fix, latest safe patch/minor within the installed major line,
+  and latest safe version overall, looked up on the npm registry), and the
+  exact `npm install <pkg>@<version>` fix command.
 - **Security-header audit** — X-Frame-Options, Strict-Transport-Security,
   X-XSS-Protection, X-Content-Type-Options, Content-Security-Policy,
   Referrer-Policy and Permissions-Policy, each with its real value, a
@@ -81,6 +83,7 @@ export const GET = createSecurityHandler({
   includeHeaders: true,      // also audit the app's own response headers
   auditTimeoutMs: 120_000,   // timeout for `npm audit`
   enableOsvFallback: true,   // fall back to OSV.dev when npm audit fails
+  enableSafeUpgradeLookup: true, // list every safe upgrade version (registry lookup)
   appRoot: process.cwd(),    // app root to scan
   authorize: (req) =>        // OPTIONAL but recommended in production
     req.headers.get('x-admin-secret') === process.env.ADMIN_SECRET,
@@ -109,6 +112,16 @@ exits non-zero whenever vulnerabilities exist — that is expected and is
 audit. Each entry yields: severity, direct/transitive, prod/dev, advisory
 title/URL/range, and fix data (`fixAvailable.version` = the minimal patched
 version, rendered as `npm install <pkg>@<version>`).
+
+**Safe upgrade options — npm registry.** For each vulnerable package the
+scanner also looks up the package's published versions on the npm registry
+and lists every version that is safe to upgrade to: the smallest version
+that fixes all advisories, the latest safe patch within the installed minor
+line, the latest safe version within the installed major line, and the
+latest safe version overall (plain releases only, deprecated versions
+excluded). The smallest option is the recommended upgrade. When the
+registry cannot be reached (or `enableSafeUpgradeLookup: false`), the table
+falls back to the patched versions known from the advisories.
 
 **Vulnerabilities — fallback: OSV.dev.** If `npm audit` fails or is
 unavailable, the scanner queries the OSV.dev `querybatch` API once per
@@ -150,14 +163,16 @@ N/A headers excluded from the denominator.
 import { scanDependencies, analyzeHeaders } from 'next-security-dashboard';
 
 const report = await scanDependencies('/path/to/app');
-console.log(report.counts, report.vulnerabilities[0]?.fixCommand);
+console.log(report.counts, report.vulnerabilities[0]?.safeUpgradeOptions);
 ```
 
 ## Limitations
 
 - The scan runs server-side (`npm audit` needs registry access, and the
   OSV.dev fallback needs internet). In fully offline environments both fail
-  and the UI shows the structured error.
+  and the UI shows the structured error. The safe-upgrade registry lookup
+  also needs internet; when it fails, the table falls back to the patched
+  versions from the advisories.
 - `npm audit` only knows about the default npm registry audit endpoint;
   private registries with their own audit data may differ.
 - Advisory CVE IDs come from OSV.dev `aliases`; `npm audit` advisories

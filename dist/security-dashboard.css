@@ -451,6 +451,31 @@
   display: inline-block;
 }
 
+.nsd-safe-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.nsd-safe-chip {
+  background: var(--nsd-code-bg);
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.nsd-safe-chip-rec {
+  border: 1px solid var(--nsd-accent);
+  font-weight: 600;
+}
+
+.nsd-safe-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 10px;
+}
+
 .nsd-detail-heading {
   margin: 14px 0 6px;
   font-size: 14px;
