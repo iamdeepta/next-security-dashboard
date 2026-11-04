@@ -1,14 +1,28 @@
 import { analyzeAppSecurity } from './analyzer.js';
 import { fetchAndAnalyzeHeaders } from './headers.js';
 import { scanDependencies } from './scanner.js';
+/**
+ * Which URL the header/app checks fetch. Priority:
+ * 1. NEXT_SECURITY_DASHBOARD_URL — an explicit operator override (e.g. check
+ *    a different deployment on purpose).
+ * 2. The origin of the incoming request — the server actually being viewed.
+ *    NEXT_PUBLIC_APP_URL / VERCEL_URL must NOT win here: when they point at
+ *    a different deployment (production, or a stale localhost port), the
+ *    checks would keep reporting the other server's headers forever and
+ *    config changes in the viewed app would appear to have no effect.
+ * 3. NEXT_PUBLIC_APP_URL, then VERCEL_URL — only when the request URL has
+ *    no usable origin (programmatic use without an HTTP request).
+ */
 function deriveOrigin(request, requestUrl) {
     const env = (typeof process !== 'undefined' ? process.env : {});
+    if (env.NEXT_SECURITY_DASHBOARD_URL)
+        return env.NEXT_SECURITY_DASHBOARD_URL.replace(/\/$/, '');
+    if (requestUrl.origin && requestUrl.origin !== 'null')
+        return requestUrl.origin;
     if (env.NEXT_PUBLIC_APP_URL)
         return env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '');
     if (env.VERCEL_URL)
         return `https://${env.VERCEL_URL}`;
-    if (env.NEXT_SECURITY_DASHBOARD_URL)
-        return env.NEXT_SECURITY_DASHBOARD_URL.replace(/\/$/, '');
     return requestUrl.origin;
 }
 /**

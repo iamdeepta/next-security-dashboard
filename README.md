@@ -188,10 +188,14 @@ the internet directly. If the OSV.dev API is unreachable too, the report
 carries a structured `error: { code: 'SCAN_FAILED', message, detail }` and
 the UI shows a retry state instead of pretending the app is clean.
 
-**Security headers.** The handler fetches the app's own origin (from the
-incoming request URL, falling back to `NEXT_PUBLIC_APP_URL`,
-`NEXT_SECURITY_DASHBOARD_URL`, or `VERCEL_URL`) with `cache: 'no-store'`
-and analyses the response headers:
+**Security headers.** The handler fetches the app's own origin with
+`cache: 'no-store'` and analyses the response headers. The origin is the
+URL of the incoming request — the server actually being viewed — unless
+`NEXT_SECURITY_DASHBOARD_URL` is set, which explicitly overrides it (e.g.
+to check a different deployment on purpose). Only when the request URL has
+no usable origin does it fall back to `NEXT_PUBLIC_APP_URL`, then
+`VERCEL_URL`, so a stale app URL in the environment can never silently
+redirect the checks to another server:
 
 | Header | OK | Warning | Missing |
 | --- | --- | --- | --- |
