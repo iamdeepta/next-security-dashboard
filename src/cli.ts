@@ -212,6 +212,9 @@ async function scaffold(
   }
 
   report.notes.push('Run the dev server and open /security to see the dashboard.');
+  report.notes.push(
+    `To remove the dashboard later, run \`npx ${PACKAGE_NAME} uninstall\` before \`npm uninstall\` — npm does not run uninstall hooks, so a plain 'npm uninstall' leaves the scaffolded files behind.`,
+  );
   return report;
 }
 
@@ -235,8 +238,14 @@ function printReport(report: ScaffoldReport, dryRun: boolean): void {
  * A scaffolded file is removed only when its contents are byte-identical
  * (ignoring surrounding whitespace) to the template the scaffolder wrote.
  * A file the user edited is left untouched — deleting customised code on
- * uninstall would destroy their work.
+ * uninstall would destroy their work. Line endings are normalised before
+ * comparing: on Windows an editor may rewrite the file with CRLF, which
+ * must not make a pristine scaffolded file look user-edited.
  */
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n');
+}
+
 async function checkScaffolded(
   file: string,
   template: string,
@@ -247,7 +256,9 @@ async function checkScaffolded(
   } catch {
     return 'absent';
   }
-  return content.trim() === template.trim() ? 'removed' : 'kept-modified';
+  const same =
+    normalizeLineEndings(content).trim() === normalizeLineEndings(template).trim();
+  return same ? 'removed' : 'kept-modified';
 }
 
 async function removeIfScaffolded(
@@ -284,10 +295,11 @@ async function stripCssImport(
   } catch {
     return 'absent';
   }
-  const lines = content.split('\n');
+  const eol = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(/\r?\n/);
   const kept = lines.filter((line) => !CSS_IMPORT_LINE.test(line.trim()));
   if (kept.length === lines.length) return 'unchanged';
-  if (!dryRun) await fs.writeFile(file, kept.join('\n'), 'utf8');
+  if (!dryRun) await fs.writeFile(file, kept.join(eol), 'utf8');
   return 'stripped';
 }
 

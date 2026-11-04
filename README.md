@@ -73,7 +73,8 @@ run uninstall hooks, so the cleanup command below is the way to remove them
 package to run it). It deletes the scaffolded API route and `/security` page
 and removes the stylesheet import line from the root layout — the layout file
 itself is always kept. A file you edited after setup is left untouched (and
-reported), so customised code is never deleted.
+reported), so customised code is never deleted. Pure line-ending changes
+(CRLF vs LF, e.g. from a Windows editor) do not count as an edit.
 
 ```bash
 npx next-security-dashboard uninstall            # remove scaffolded files
