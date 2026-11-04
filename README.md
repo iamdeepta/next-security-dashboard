@@ -37,7 +37,45 @@ npm install next-security-dashboard
 Requires Node 18+, React 18+ and Next.js 13+ (App Router) as peer
 dependencies. No other runtime dependencies.
 
-## Wiring (3 small files)
+## Automatic setup (recommended)
+
+Installing the package asks you to choose — but only when the install is
+interactive (a real terminal). Non-interactive installs (CI, scripts) only
+print a hint and add nothing.
+
+- **Automatic** — creates the API route, the `/security` page and the
+  stylesheet import in your project. Existing files are never overwritten.
+- **Manual** — adds nothing; wire it up yourself with the 3 files below.
+
+The same choice is available anytime after installing:
+
+```bash
+npx next-security-dashboard setup            # ask: automatic or manual
+npx next-security-dashboard setup --auto     # scaffold without asking
+npx next-security-dashboard setup --manual   # print the manual steps only
+npx next-security-dashboard setup --dry-run  # preview what --auto would do
+```
+
+`NSD_SETUP=auto|manual|skip` overrides the prompt (useful for scripts and
+CI). Automatic setup supports the App Router (`app/` or `src/app/`,
+TypeScript or JavaScript); Pages Router projects get the manual steps.
+
+## Uninstall
+
+`npm uninstall` alone does **not** remove the scaffolded files — npm does not
+run uninstall hooks, so the cleanup command below is the way to remove them
+(it works before or after uninstalling; after uninstalling, `npx` fetches the
+package to run it). It deletes the scaffolded API route and `/security` page
+and removes the stylesheet import line from the root layout — the layout file
+itself is always kept. A file you edited after setup is left untouched (and
+reported), so customised code is never deleted.
+
+```bash
+npx next-security-dashboard uninstall            # remove scaffolded files
+npx next-security-dashboard uninstall --dry-run  # preview what would go
+```
+
+## Manual wiring (3 small files)
 
 **1. API route — `app/api/security-scan/route.ts`**
 

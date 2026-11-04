@@ -52,9 +52,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/security-dashboard.css dist/security-dashboard.css",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "postinstall": "node ./dist/cli.js postinstall || exit 0",
+    "preuninstall": "node ./dist/cli.js preuninstall || exit 0"
   },
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "0.3.0"
+  "version": "0.5.0",
+  "bin": {
+    "next-security-dashboard": "./dist/cli.js"
+  }
 }
