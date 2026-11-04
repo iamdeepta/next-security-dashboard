@@ -226,24 +226,61 @@ function isDevPackage(name, entry, inventory) {
         return true;
     return entry?.dev ?? false;
 }
+/**
+ * Turn a failed `npm audit` run into a reason the user can act on, instead
+ * of a generic "no usable data" message. The raw stderr is still kept as
+ * `detail` on the report error; this classifies the common cases.
+ */
+function classifyAuditFailure(error, stderr, stdoutText, timeoutMs) {
+    const err = error;
+    if (err?.code === 'ETIMEDOUT' || err?.signal === 'SIGTERM') {
+        return `npm audit timed out after ${Math.round(timeoutMs / 1000)}s. Raise auditTimeoutMs, or run the scan when the registry is reachable.`;
+    }
+    if (err?.code === 'ENOENT') {
+        return `'npm' was not found on PATH, so npm audit could not run.`;
+    }
+    if (/ENOLOCK|requires a lockfile|no lockfile/i.test(stderr)) {
+        return `npm audit needs a package-lock.json in this project (run 'npm install' to generate one), or pass enableOsvFallback: true to check without it.`;
+    }
+    // Registry rejections surface in stderr ("npm error ...") and/or in an
+    // error JSON on stdout ({ message: "403 Forbidden - POST .../audits/quick" }).
+    const haystack = `${stderr}\n${stdoutText.slice(0, 500)}`;
+    if (/ENEEDAUTH|E401|E403|403 Forbidden|401 Unauthorized|policy_denied|authentication|must be logged in/i.test(haystack)) {
+        return 'npm audit was rejected by the npm registry (access denied). Check registry access/authentication, or pass enableOsvFallback: true.';
+    }
+    if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|network|socket hang up/i.test(haystack)) {
+        return 'npm audit could not reach the npm registry (network error).';
+    }
+    if (stdoutText.trim()) {
+        return 'npm audit returned output in a format this version does not understand.';
+    }
+    return `npm audit produced no output. Run 'npm audit --json' in the project directory to see the underlying error.`;
+}
 function runNpmAudit(appRoot, timeoutMs) {
     return new Promise((resolve) => {
-        execFile('npm', ['audit', '--json'], { cwd: appRoot, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (_error, stdout, stderr) => {
+        execFile('npm', ['audit', '--json'], { cwd: appRoot, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
             // NOTE: npm audit exits non-zero when vulnerabilities are found, so
             // a non-zero exit is expected and NOT a failure — only unparseable
             // stdout counts as a failed audit.
             const text = String(stdout ?? '');
+            const errText = String(stderr ?? '');
             try {
                 const parsed = JSON.parse(text);
-                if (isObject(parsed) && isObject(parsed.vulnerabilities)) {
-                    resolve({ parsed, stderr: String(stderr ?? '') });
+                // Modern npm (>=7): { vulnerabilities: {...} }.
+                // Older npm (<=6): { advisories: {...} } — same data, older shape.
+                if (isObject(parsed) && (isObject(parsed.vulnerabilities) || isObject(parsed.advisories))) {
+                    resolve({ parsed, stderr: errText, failure: null });
                     return;
                 }
             }
             catch {
                 // fall through to failure
             }
-            resolve({ parsed: null, stderr: String(stderr ?? '') || text.slice(0, 500) });
+            resolve({
+                parsed: null,
+                stderr: errText || text.slice(0, 500),
+                failure: classifyAuditFailure(error, errText, text, timeoutMs),
+            });
         });
     });
 }
@@ -327,6 +364,63 @@ function parseAuditReport(report, inventory) {
             safeUpgradeOptions: [],
             fixCommand,
             fixAvailable,
+        });
+    }
+    return result;
+}
+/**
+ * Parse the older `npm audit --json` shape (npm <= 6): `{ advisories: { id:
+ * { module_name, severity, title, url, vulnerable_versions,
+ * patched_versions, cwe, cvss } } }`. Patched versions arrive as a range
+ * string (e.g. ">=4.17.21"), not a plain version, so no concrete upgrade
+ * version is claimed — `npm audit fix` is the repair path.
+ */
+function parseAuditLegacyReport(report, inventory) {
+    const advisoriesMap = report.advisories;
+    const directNames = [...inventory.direct, ...inventory.directDev];
+    const result = [];
+    for (const rec of Object.values(advisoriesMap)) {
+        if (!isObject(rec))
+            continue;
+        const name = typeof rec.module_name === 'string' ? rec.module_name : null;
+        if (!name)
+            continue;
+        const severity = asSeverity(rec.severity, 'moderate');
+        const patched = typeof rec.patched_versions === 'string' ? rec.patched_versions : '';
+        const hasPatch = patched !== '' && patched !== '<0.0.0';
+        const cwe = Array.isArray(rec.cwe)
+            ? rec.cwe.filter((c) => typeof c === 'string')
+            : [];
+        const cvss = isObject(rec.cvss) ? rec.cvss : null;
+        const lockEntry = inventory.byName.get(name);
+        const installedVersion = lockEntry?.version ?? 'unknown';
+        const isDirect = inventory.direct.has(name) || inventory.directDev.has(name);
+        const isDev = isDevPackage(name, lockEntry, inventory);
+        const advisory = {
+            title: typeof rec.title === 'string' ? rec.title : `Advisory for ${name}`,
+            url: typeof rec.url === 'string' ? rec.url : null,
+            severity,
+            range: typeof rec.vulnerable_versions === 'string' ? rec.vulnerable_versions : '',
+            cwe,
+            cvssScore: cvss && typeof cvss.score === 'number' ? cvss.score : null,
+            cveIds: [],
+            ghsaId: null,
+            source: 'npm-audit',
+        };
+        result.push({
+            packageName: name,
+            installedVersion,
+            severity,
+            isDirect,
+            isDev,
+            pulledInBy: isDirect ? [] : pulledInBy(name, inventory, directNames),
+            advisories: [advisory],
+            vulnerableRange: advisory.range,
+            patchedVersions: [],
+            recommendedUpgrade: null,
+            safeUpgradeOptions: [],
+            fixCommand: hasPatch ? 'npm audit fix' : null,
+            fixAvailable: hasPatch,
         });
     }
     return result;
@@ -774,18 +868,20 @@ export async function scanDependencies(appRoot, options = {}) {
     const audit = await runNpmAudit(appRoot, auditTimeoutMs);
     if (audit.parsed) {
         source = 'npm-audit';
-        vulnerabilities = parseAuditReport(audit.parsed, inventory);
+        vulnerabilities = isObject(audit.parsed.vulnerabilities)
+            ? parseAuditReport(audit.parsed, inventory)
+            : parseAuditLegacyReport(audit.parsed, inventory);
     }
     else if (enableOsvFallback) {
         try {
             vulnerabilities = await scanWithOsv(inventory);
             source = 'osv';
-            if (audit.stderr) {
+            if (audit.failure) {
                 // Advisory notice only: the UI shows this as a banner above real
                 // data, not as a failed scan.
                 error = {
                     code: 'AUDIT_UNAVAILABLE',
-                    message: 'npm audit did not return usable data; results come from the fallback vulnerability database.',
+                    message: `${audit.failure} Results come from the fallback vulnerability database.`,
                     detail: audit.stderr.slice(0, 300),
                 };
             }
@@ -801,7 +897,7 @@ export async function scanDependencies(appRoot, options = {}) {
     else {
         error = {
             code: 'AUDIT_FAILED',
-            message: 'npm audit did not return usable data. The fallback vulnerability check is turned off (pass enableOsvFallback: true to use it).',
+            message: `${audit.failure ?? 'npm audit did not return usable data.'} The fallback vulnerability check is turned off (pass enableOsvFallback: true to use it).`,
             detail: audit.stderr.slice(0, 300),
         };
     }

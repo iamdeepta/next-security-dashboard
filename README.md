@@ -188,6 +188,15 @@ the internet directly. If the OSV.dev API is unreachable too, the report
 carries a structured `error: { code: 'SCAN_FAILED', message, detail }` and
 the UI shows a retry state instead of pretending the app is clean.
 
+**When `npm audit` cannot run.** With the fallback off, an unusable audit
+result no longer reports a bare "did not return usable data": the notice
+names the underlying reason and the UI shows npm's own error text beside
+it. The common reasons are a missing `package-lock.json` (`npm audit`
+needs one — run `npm install`, or pass `enableOsvFallback: true`), the
+audit timing out (`auditTimeoutMs`, default 120s), a registry login or
+network failure, and an old npm (<= 6) audit format, which is parsed
+directly.
+
 **Security headers.** The handler fetches the app's own origin with
 `cache: 'no-store'` and analyses the response headers. The origin is the
 URL of the incoming request — the server actually being viewed — unless

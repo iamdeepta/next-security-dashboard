@@ -513,7 +513,8 @@ export function SecurityDashboard({
         <>
           {report.error && (
             <div className="nsd-notice" role="status">
-              <strong>Note:</strong> {report.error.message}
+              <strong>Note:</strong> {report.error.message}{' '}
+              {report.error.detail ? <span className="nsd-muted">{report.error.detail}</span> : null}
             </div>
           )}
 
