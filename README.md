@@ -22,6 +22,11 @@ wire up two small files, and visiting `/security` shows:
   exposure, iframe framing (clickjacking), cookie `Secure`/`HttpOnly`/
   `SameSite` flags, public source maps and generator meta tags. Every
   finding names the file and line and ships a fix.
+- **Scan progress** — while a scan runs, the dashboard shows a stage-based
+  progress bar with a percentage, so a slow scan never looks frozen. The
+  percentage is estimated from elapsed time (`npm audit` is usually the
+  slowest step) and reaches 100% only when the report arrives; if a scan
+  takes over 4 minutes the dashboard stops and offers a retry.
 
 The UI ships its own namespaced CSS (`nsd-*` classes) — **no Tailwind
 required** in the host app — and includes search, severity/direct/prod-dev
@@ -129,7 +134,7 @@ export const GET = createSecurityHandler({
   includeHeaders: true,      // also audit the app's own response headers
   includeAppChecks: true,    // also analyse the host app's own source + runtime behaviour
   auditTimeoutMs: 120_000,   // timeout for `npm audit`
-  enableOsvFallback: true,   // fall back to OSV.dev when npm audit fails
+  enableOsvFallback: false,  // OFF by default; opt in to fall back to a vulnerability database when npm audit fails
   enableSafeUpgradeLookup: true, // list every safe upgrade version (registry lookup)
   appRoot: process.cwd(),    // app root to scan
   authorize: (req) =>        // OPTIONAL but recommended in production
@@ -170,10 +175,10 @@ excluded). The smallest option is the recommended upgrade. When the
 registry cannot be reached (or `enableSafeUpgradeLookup: false`), the table
 falls back to the patched versions known from the advisories.
 
-**Vulnerabilities — fallback: OSV.dev.** If `npm audit` fails or is
-unavailable, the scanner queries the OSV.dev `querybatch` API once per
-installed `package@version` (which returns only vulnerability IDs), then
-fetches the full record for each ID (`/v1/vulns/{id}`) to read the summary,
+**Vulnerabilities — fallback (off by default).** If `enableOsvFallback: true`
+is passed and `npm audit` fails or is unavailable, the scanner queries the
+OSV.dev `querybatch` API once per installed `package@version` (which returns
+only vulnerability IDs), then fetches the full record for each ID (`/v1/vulns/{id}`) to read the summary,
 severity, SEMVER `introduced`/`fixed` events, and aliases, and recommends
 the smallest fixed version above the installed one. Severity comes from the
 record's `database_specific.severity` when present, otherwise from a CVSS

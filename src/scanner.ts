@@ -17,7 +17,7 @@ export interface ScanOptions {
   appRoot?: string;
   /** Timeout for `npm audit` in ms. Defaults to 120000. */
   auditTimeoutMs?: number;
-  /** When npm audit fails, fall back to the OSV.dev API. Defaults to true. */
+  /** When npm audit fails, fall back to a vulnerability-database check. Defaults to false. */
   enableOsvFallback?: boolean;
   /**
    * Look up published versions on the npm registry to list every safe
@@ -667,7 +667,7 @@ async function scanWithOsv(inventory: Inventory): Promise<Vulnerability[]> {
   if (queries.length === 0) return [];
   const { results, anySuccess } = await queryOsvBatch(queries);
   if (!anySuccess) {
-    throw new Error('OSV.dev API could not be reached (all query batches failed).');
+    throw new Error('The fallback vulnerability database could not be reached (all query batches failed).');
   }
   const allIds = [...new Set([...results.values()].flat())];
   const details = await fetchOsvVulnDetails(allIds);
@@ -898,7 +898,7 @@ export async function scanDependencies(
   options: ScanOptions = {},
 ): Promise<SecurityReport> {
   const auditTimeoutMs = options.auditTimeoutMs ?? 120000;
-  const enableOsvFallback = options.enableOsvFallback ?? true;
+  const enableOsvFallback = options.enableOsvFallback ?? false;
 
   const pkg = (await readJsonFile<Record<string, unknown>>(
     path.join(appRoot, 'package.json'),
@@ -927,21 +927,21 @@ export async function scanDependencies(
         // data, not as a failed scan.
         error = {
           code: 'AUDIT_UNAVAILABLE',
-          message: 'npm audit did not return usable data; results come from the OSV.dev fallback.',
+          message: 'npm audit did not return usable data; results come from the fallback vulnerability database.',
           detail: audit.stderr.slice(0, 300),
         };
       }
     } catch (err) {
       error = {
         code: 'SCAN_FAILED',
-        message: 'Both npm audit and the OSV.dev fallback failed.',
+        message: 'Both npm audit and the fallback check failed.',
         detail: err instanceof Error ? err.message : String(err),
       };
     }
   } else {
     error = {
       code: 'AUDIT_FAILED',
-      message: 'npm audit did not return usable data and the OSV.dev fallback is disabled.',
+      message: 'npm audit did not return usable data. The fallback vulnerability check is turned off (pass enableOsvFallback: true to use it).',
       detail: audit.stderr.slice(0, 300),
     };
   }
@@ -989,7 +989,7 @@ export async function scanDependencies(
     appName,
     appRoot,
     source,
-    toolVersions: { node: process.version, scanner: source === 'osv' ? 'osv.dev' : 'npm audit' },
+    toolVersions: { node: process.version, scanner: source === 'osv' ? 'fallback vulnerability database' : 'npm audit' },
     packages,
     vulnerabilities: vulnerabilities.sort(
       (a, b) =>

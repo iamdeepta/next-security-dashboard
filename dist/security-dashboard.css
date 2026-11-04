@@ -364,6 +364,32 @@
 .nsd-badge-header-missing { background: var(--nsd-bad-bg); color: var(--nsd-bad); }
 .nsd-badge-header-na { background: var(--nsd-surface-2); color: var(--nsd-muted); }
 .nsd-badge-app-pass { background: var(--nsd-ok-bg); color: var(--nsd-ok); }
+.nsd-progress {
+  margin: 16px 0 4px;
+}
+.nsd-progress-slim {
+  margin: 0 0 16px;
+}
+.nsd-progress-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--nsd-muted);
+}
+.nsd-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--nsd-track);
+  overflow: hidden;
+  margin-top: 6px;
+}
+.nsd-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--nsd-accent), var(--nsd-ok));
+  transition: width 0.5s ease;
+}
 .nsd-badge-app-warn { background: var(--nsd-warn-bg); color: var(--nsd-warn); }
 .nsd-badge-app-fail { background: var(--nsd-bad-bg); color: var(--nsd-bad); }
 .nsd-badge-app-na { background: var(--nsd-surface-2); color: var(--nsd-muted); }

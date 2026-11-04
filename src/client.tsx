@@ -184,6 +184,32 @@ function Donut({ counts }: { counts: SecurityReport['counts'] }) {
   );
 }
 
+/**
+ * Estimated scan progress from elapsed time. The server scan is one long
+ * operation (npm audit dominates it) with no sub-step reporting, so the
+ * bar is stage-based: it advances toward 90% while the scan runs and only
+ * reaches 100% when the report actually arrives. The stage text says what
+ * is happening so a slow scan never looks frozen.
+ */
+function progressForElapsed(ms: number): { pct: number; stage: string } {
+  if (ms < 5000) {
+    return { pct: 8 + (ms / 5000) * 17, stage: 'Reading installed packages…' };
+  }
+  if (ms < 20000) {
+    return {
+      pct: 25 + ((ms - 5000) / 15000) * 30,
+      stage: 'Running npm audit — this is usually the slowest step…',
+    };
+  }
+  if (ms < 60000) {
+    return { pct: 55 + ((ms - 20000) / 40000) * 20, stage: 'Checking the results…' };
+  }
+  return {
+    pct: Math.min(90, 75 + (ms - 60000) / 60000),
+    stage: 'Still checking — a large project can take a couple of minutes…',
+  };
+}
+
 export function SecurityDashboard({
   endpoint = '/api/security-scan',
   refreshIntervalMs = 0,
@@ -192,6 +218,9 @@ export function SecurityDashboard({
   const [report, setReport] = useState<SecurityReport | null>(initialReport ?? null);
   const [loading, setLoading] = useState(!initialReport);
   const [error, setError] = useState<string | null>(null);
+  const [scanNonce, setScanNonce] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [progressStage, setProgressStage] = useState('Reading installed packages…');
   const [tab, setTab] = useState<Tab>('vulns');
   const [dark, setDark] = useState(false);
 
@@ -216,10 +245,16 @@ export function SecurityDashboard({
     async (fresh: boolean) => {
       setLoading(true);
       setError(null);
+      setScanNonce((n) => n + 1);
+      setProgress(5);
+      setProgressStage('Reading installed packages…');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 240_000);
       try {
         const sep = endpoint.includes('?') ? '&' : '?';
         const res = await fetch(`${endpoint}${fresh ? `${sep}fresh=1` : ''}`, {
           cache: 'no-store',
+          signal: controller.signal,
         });
         const data = (await res.json()) as SecurityReport & { error?: { message: string } };
         if (!res.ok) {
@@ -227,13 +262,31 @@ export function SecurityDashboard({
         }
         setReport(data);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load the security report.');
+        if (err instanceof Error && err.name === 'AbortError') {
+          setError(
+            'The scan took over 4 minutes and was stopped. This usually means npm audit is very slow on this project — try again, or speed it up with auditTimeoutMs, enableSafeUpgradeLookup: false, or a longer cacheTtlMs.',
+          );
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to load the security report.');
+        }
       } finally {
+        clearTimeout(timeout);
         setLoading(false);
       }
     },
     [endpoint],
   );
+
+  useEffect(() => {
+    if (!loading) return undefined;
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      const { pct, stage } = progressForElapsed(Date.now() - startedAt);
+      setProgress(Math.round(pct));
+      setProgressStage(stage);
+    }, 500);
+    return () => clearInterval(id);
+  }, [loading, scanNonce]);
 
   useEffect(() => {
     if (!initialReport) void load(false);
@@ -391,10 +444,45 @@ export function SecurityDashboard({
 
       {loading && !report && (
         <div className="nsd-skeleton-wrap" aria-busy="true">
+          <div
+            className="nsd-progress"
+            role="progressbar"
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Security scan progress"
+          >
+            <div className="nsd-progress-top">
+              <span>{progressStage}</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="nsd-progress-track">
+              <div className="nsd-progress-fill" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
           <div className="nsd-skeleton nsd-skeleton-cards" />
           <div className="nsd-skeleton nsd-skeleton-table" />
           <div className="nsd-skeleton nsd-skeleton-table" />
           <p className="nsd-muted">Running npm audit &amp; checking security headers…</p>
+        </div>
+      )}
+
+      {loading && report && (
+        <div
+          className="nsd-progress nsd-progress-slim"
+          role="progressbar"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Re-scan progress"
+        >
+          <div className="nsd-progress-top">
+            <span>{progressStage}</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="nsd-progress-track">
+            <div className="nsd-progress-fill" style={{ width: `${progress}%` }} />
+          </div>
         </div>
       )}
 
@@ -470,7 +558,7 @@ export function SecurityDashboard({
               <p>
                 {report.source === 'npm-audit'
                   ? 'npm audit reported no known vulnerabilities for the installed dependencies.'
-                  : 'The OSV.dev fallback found no known vulnerabilities for the installed dependencies.'}{' '}
+                  : 'The fallback check found no known vulnerabilities for the installed dependencies.'}{' '}
                 Keep it that way — re-scan after every dependency change.
               </p>
             </div>
@@ -739,7 +827,9 @@ export function SecurityDashboard({
                                               Advisory ↗
                                             </a>
                                           )}
-                                          <span className="nsd-muted">via {a.source}</span>
+                                          <span className="nsd-muted">
+                                            via {a.source === 'osv.dev' ? 'fallback database' : 'npm audit'}
+                                          </span>
                                         </div>
                                       </li>
                                     ))}

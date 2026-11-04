@@ -4,7 +4,7 @@ export interface ScanOptions {
     appRoot?: string;
     /** Timeout for `npm audit` in ms. Defaults to 120000. */
     auditTimeoutMs?: number;
-    /** When npm audit fails, fall back to the OSV.dev API. Defaults to true. */
+    /** When npm audit fails, fall back to a vulnerability-database check. Defaults to false. */
     enableOsvFallback?: boolean;
     /**
      * Look up published versions on the npm registry to list every safe
