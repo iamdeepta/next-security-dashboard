@@ -199,7 +199,11 @@ network failure, and an old npm (<= 6) audit format, which is parsed
 directly.
 
 **Security headers.** The handler fetches the app's own origin with
-`cache: 'no-store'` and analyses the response headers. The origin is the
+`cache: 'no-store'` and analyses the response headers. The request is made
+directly over HTTP, not through the app's global `fetch`, so a fetch
+monkey-patch in the host app (for example a request-logging
+`instrumentation.ts` that rebuilds responses) cannot hide the headers the
+server actually sends. The origin is the
 URL of the incoming request — the server actually being viewed — unless
 `NEXT_SECURITY_DASHBOARD_URL` is set, which explicitly overrides it (e.g.
 to check a different deployment on purpose). Only when the request URL has

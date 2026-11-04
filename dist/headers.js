@@ -1,3 +1,4 @@
+import { directFetch } from './direct-fetch.js';
 const HEADER_FIX_INTRO = `// next.config.js
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -271,18 +272,14 @@ export function analyzeHeaders(headers, url, statusCode) {
     const score = possible > 0 ? Math.round((earned / possible) * 100) : null;
     return { url, statusCode, checks, score, fetchedAt: new Date().toISOString() };
 }
-/** Fetch the app's own origin and analyse the response headers. */
+/** Fetch the app's own origin and analyse the response headers. Uses a
+ * direct node:http/https request (see direct-fetch.ts) instead of global
+ * fetch, so a fetch monkey-patch in the host app cannot hide the headers
+ * the server actually sends. */
 export async function fetchAndAnalyzeHeaders(origin) {
     const target = origin.replace(/\/$/, '');
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
     try {
-        const res = await fetch(target, {
-            method: 'GET',
-            cache: 'no-store',
-            redirect: 'follow',
-            signal: controller.signal,
-        });
+        const res = await directFetch(target, { timeoutMs: 10000 });
         // Drain the body so the connection can be reused; we only need headers.
         await res.arrayBuffer().catch(() => undefined);
         return analyzeHeaders(res.headers, res.url || target, res.status);
@@ -297,8 +294,5 @@ export async function fetchAndAnalyzeHeaders(origin) {
             fetchedAt: new Date().toISOString(),
             error: `Could not fetch ${target} to inspect headers: ${message}`,
         };
-    }
-    finally {
-        clearTimeout(timer);
     }
 }

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
+import { directFetch } from './direct-fetch.js';
 import type {
   AppCheck,
   AppCheckLocation,
@@ -327,21 +328,14 @@ interface FetchedPage {
 
 async function fetchPage(origin: string): Promise<FetchedPage | null> {
   const target = origin.replace(/\/$/, '');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
   try {
-    const res = await fetch(target, {
-      method: 'GET',
-      cache: 'no-store',
-      redirect: 'follow',
-      signal: controller.signal,
-    });
+    // Direct request: a fetch monkey-patch in the host app must not be
+    // able to hide what the server actually sends (see direct-fetch.ts).
+    const res = await directFetch(target, { timeoutMs: 10000 });
     const html = await res.text().catch(() => '');
     return { headers: res.headers, url: res.url || target, status: res.status, html };
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -521,7 +515,7 @@ async function checkSourceMaps(page: FetchedPage, origin: string): Promise<AppCh
   for (const jsUrl of unique) {
     let jsText = '';
     try {
-      const res = await fetch(`${originBase}${jsUrl}`, { cache: 'no-store' });
+      const res = await directFetch(`${originBase}${jsUrl}`, { timeoutMs: 10000 });
       if (!res.ok) continue;
       jsText = await res.text().catch(() => '');
     } catch {
@@ -532,7 +526,7 @@ async function checkSourceMaps(page: FetchedPage, origin: string): Promise<AppCh
     const mapUrl = mapMatch[1];
     const absolute = mapUrl.startsWith('http') ? mapUrl : `${originBase}${jsUrl.split('/').slice(0, -1).join('/')}/${mapUrl}`;
     try {
-      const mapRes = await fetch(absolute, { cache: 'no-store' });
+      const mapRes = await directFetch(absolute, { timeoutMs: 10000 });
       const mapText = await mapRes.text().catch(() => '');
       if (mapRes.ok && mapText.includes('"sources"')) {
         return {
