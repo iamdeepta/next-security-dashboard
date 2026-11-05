@@ -58,7 +58,7 @@
   },
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "bin": {
     "next-security-dashboard": "./dist/cli.js"
   }

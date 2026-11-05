@@ -168,13 +168,19 @@ version, rendered as `npm install <pkg>@<version>`).
 
 **Safe upgrade options — npm registry.** For each vulnerable package the
 scanner also looks up the package's published versions on the npm registry
-and lists every version that is safe to upgrade to: the smallest version
-that fixes all advisories, the latest safe patch within the installed minor
-line, the latest safe version within the installed major line, and the
-latest safe version overall (plain releases only, deprecated versions
-excluded). The smallest option is the recommended upgrade. When the
-registry cannot be reached (or `enableSafeUpgradeLookup: false`), the table
-falls back to the patched versions known from the advisories.
+(abbreviated metadata, so even very large packages stay fast) and lists
+every version that is safe to upgrade to: the smallest version that fixes
+all advisories, the latest safe patch within the installed minor line, the
+latest safe version within the installed major line, and the latest safe
+version overall (plain releases only, deprecated versions excluded). The
+smallest option is the recommended upgrade. When the registry cannot be
+reached (or `enableSafeUpgradeLookup: false`), the table falls back to the
+patched versions known from the advisories — but only versions at or above
+the fix floor (the highest patched version across all advisories for that
+package), so a version that fixes one advisory and leaves others open is
+never listed as safe; the scanner also fetches the tiny `/latest` document
+so the latest safe stable version is shown even when the full version list
+cannot be downloaded.
 
 **Vulnerabilities — fallback (off by default).** If `enableOsvFallback: true`
 is passed and `npm audit` fails or is unavailable, the scanner queries the

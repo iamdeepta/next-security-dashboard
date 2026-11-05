@@ -543,20 +543,25 @@ interface OsvVuln {
  * direct request hangs until timeout.
  * Returns null when the request could not be completed at all.
  */
-async function fetchJsonWithFallback<T>(url: string, body?: string): Promise<T | null> {
+async function fetchJsonWithFallback<T>(
+  url: string,
+  body?: string,
+  init?: { headers?: Record<string, string>; timeoutMs?: number },
+): Promise<T | null> {
+  const timeoutMs = init?.timeoutMs ?? 20000;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(
       url,
       body !== undefined
         ? {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
             body,
             signal: controller.signal,
           }
-        : { signal: controller.signal },
+        : { headers: init?.headers, signal: controller.signal },
     );
     if (!res.ok) return null;
     return (await res.json()) as T;
@@ -566,7 +571,12 @@ async function fetchJsonWithFallback<T>(url: string, body?: string): Promise<T |
     clearTimeout(timer);
   }
   try {
-    const args = ['-sS', '--max-time', '25'];
+    const args = ['-sS', '--compressed', '--max-time', String(Math.ceil(timeoutMs / 1000))];
+    if (init?.headers) {
+      for (const [key, value] of Object.entries(init.headers)) {
+        args.push('-H', `${key}: ${value}`);
+      }
+    }
     if (body !== undefined) {
       args.push('-X', 'POST', '-H', 'Content-Type: application/json', '-d', body);
     }
@@ -575,7 +585,7 @@ async function fetchJsonWithFallback<T>(url: string, body?: string): Promise<T |
       execFile(
         'curl',
         args,
-        { timeout: 30000, maxBuffer: 32 * 1024 * 1024, windowsHide: true },
+        { timeout: timeoutMs + 5000, maxBuffer: 32 * 1024 * 1024, windowsHide: true },
         (error, out) => {
           if (error) reject(error);
           else resolve(String(out));
@@ -870,8 +880,16 @@ function registryEscapeName(name: string): string {
 async function fetchRegistryVersions(
   name: string,
 ): Promise<{ versions: string[]; deprecated: Set<string> } | null> {
+  // Abbreviated ("corgi") metadata: same version list, far smaller than the
+  // full packument, with a longer timeout so huge packages (e.g. next,
+  // 4000+ versions) do not time out on slow connections.
   const doc = await fetchJsonWithFallback<RegistryDoc>(
     `https://registry.npmjs.org/${registryEscapeName(name)}`,
+    undefined,
+    {
+      headers: { Accept: 'application/vnd.npm.install-v1+json' },
+      timeoutMs: 60000,
+    },
   );
   if (!doc || !doc.versions) return null;
   const deprecated = new Set<string>();
@@ -883,6 +901,28 @@ async function fetchRegistryVersions(
     }
   }
   return { versions, deprecated };
+}
+
+/**
+ * Lightweight latest-stable check: the /latest document is a few KB, so
+ * it works even when the full packument fetch fails. Returns null when
+ * the version is not a plain release or the request could not complete.
+ */
+async function fetchLatestVersion(
+  name: string,
+): Promise<{ version: string; deprecated: boolean } | null> {
+  const doc = await fetchJsonWithFallback<{ version?: unknown; deprecated?: unknown }>(
+    `https://registry.npmjs.org/${registryEscapeName(name)}/latest`,
+    undefined,
+    { timeoutMs: 15000 },
+  );
+  if (!doc || typeof doc.version !== 'string' || !isReleaseVersion(doc.version)) {
+    return null;
+  }
+  return {
+    version: doc.version,
+    deprecated: typeof doc.deprecated === 'string' && doc.deprecated.length > 0,
+  };
 }
 
 /**
@@ -938,21 +978,33 @@ function computeSafeOptions(
   return options;
 }
 
-/** Offline fallback: the patched versions known from the advisories. */
+/**
+ * Offline fallback: the patched versions known from the advisories. Only
+ * versions at or above the fix floor (the highest patched version across
+ * ALL advisories for this package) are listed — a version that fixes one
+ * advisory but not the others is not a safe upgrade and must not appear
+ * here. Applies to every package; the floor is computed per row.
+ */
 function fallbackSafeOptions(vuln: Vulnerability): SafeUpgradeOption[] {
+  const floor = maxSemver(vuln.patchedVersions);
   const fixed = [...new Set(vuln.patchedVersions)]
     .filter((v) => {
       try {
-        return compareSemver(v, vuln.installedVersion) > 0;
+        return (
+          compareSemver(v, vuln.installedVersion) > 0 &&
+          (floor === null || compareSemver(v, floor) >= 0)
+        );
       } catch {
         return false;
       }
     })
     .sort(compareSemver);
-  return fixed.map((version, i) => ({
+  const options = fixed.map((version, i) => ({
     version,
     label: i === 0 ? 'Smallest fix' : 'Patched version',
   }));
+  if (options.length === 1) options[0].label = 'Recommended';
+  return options;
 }
 
 async function enrichWithSafeUpgrades(
@@ -961,7 +1013,17 @@ async function enrichWithSafeUpgrades(
 ): Promise<void> {
   // Fallback options first, so every row lists something even when the
   // registry cannot be reached.
-  for (const v of vulns) v.safeUpgradeOptions = fallbackSafeOptions(v);
+  for (const v of vulns) {
+    v.safeUpgradeOptions = fallbackSafeOptions(v);
+    // The recommended upgrade is the smallest version that fixes ALL
+    // advisories for the package (the floor), not the smallest patched
+    // version of any single advisory — e.g. next 16.3.6 fixes one
+    // advisory but leaves the RCEs fixed in 16.4.1 open.
+    if (v.safeUpgradeOptions.length > 0) {
+      v.recommendedUpgrade = v.safeUpgradeOptions[0].version;
+      v.fixCommand = `npm install ${v.packageName}@${v.safeUpgradeOptions[0].version}`;
+    }
+  }
   if (!enableLookup) return;
 
   const CONCURRENCY = 4;
@@ -977,7 +1039,35 @@ async function enrichWithSafeUpgrades(
         } catch {
           registry = null;
         }
-        if (!registry) return;
+        if (!registry) {
+          // Packument unreachable: still try the tiny /latest document so
+          // the latest safe stable version is shown even in degraded
+          // conditions (the fallback options above already carry the
+          // smallest fully-safe version).
+          try {
+            const latest = await fetchLatestVersion(v.packageName);
+            if (
+              latest &&
+              !latest.deprecated &&
+              floor &&
+              compareSemver(latest.version, floor) >= 0 &&
+              compareSemver(latest.version, v.installedVersion) > 0 &&
+              !v.safeUpgradeOptions.some((o) => o.version === latest.version)
+            ) {
+              v.safeUpgradeOptions = [...v.safeUpgradeOptions, { version: latest.version, label: 'Latest' }].sort(
+                (a, b) => compareSemver(a.version, b.version),
+              );
+              // A lone fallback option was labelled 'Recommended'; with a
+              // second option it is the smallest fix instead.
+              if (v.safeUpgradeOptions.length > 1 && v.safeUpgradeOptions[0].label === 'Recommended') {
+                v.safeUpgradeOptions[0].label = 'Smallest fix';
+              }
+            }
+          } catch {
+            // Latest check failed too; the floor-filtered fallback stands.
+          }
+          return;
+        }
         const options = computeSafeOptions(
           v.installedVersion,
           floor,
