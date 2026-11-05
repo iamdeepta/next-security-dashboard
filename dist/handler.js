@@ -37,7 +37,7 @@ function deriveOrigin(request, requestUrl) {
  * GET returns the JSON security report. Add `?fresh=1` to bypass the cache.
  */
 export function createSecurityHandler(options = {}) {
-    const { cacheTtlMs = 60000, includeHeaders = true, includeAppChecks = true, authorize, ...scanOptions } = options;
+    const { cacheTtlMs = 60000, includeHeaders = true, includeAppChecks = true, includeNotices = false, authorize, ...scanOptions } = options;
     let cached = null;
     return async function GET(request) {
         if (authorize) {
@@ -101,6 +101,12 @@ export function createSecurityHandler(options = {}) {
                 };
                 report.appSecurity = fallback;
             }
+        }
+        // The advisory notice (npm audit failed / fallback used / fallback
+        // off) is opt-in via includeNotices. A total scan failure is always
+        // kept, so a failed scan never looks like a clean one.
+        if (!includeNotices && report.error && report.error.code !== 'SCAN_FAILED') {
+            report.error = undefined;
         }
         cached = { at: Date.now(), report };
         return Response.json(report);

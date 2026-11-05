@@ -30,6 +30,7 @@ const ROUTE_FILE = `import { createSecurityHandler } from '${PACKAGE_NAME}';
 export const dynamic = 'force-dynamic';
 
 export const GET = createSecurityHandler();
+// To show the scan notice banner, pass { includeNotices: true }.
 `;
 
 const PAGE_FILE = `import { SecurityDashboard } from '${PACKAGE_NAME}/client';
@@ -52,6 +53,7 @@ const MANUAL_STEPS = `Manual setup (3 small files):
    export const dynamic = 'force-dynamic';
 
    export const GET = createSecurityHandler();
+   // To show the scan notice banner, pass { includeNotices: true }.
 
 2. Stylesheet — import once in your root layout (app/layout.tsx)
 

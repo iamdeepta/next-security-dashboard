@@ -421,7 +421,10 @@ export function SecurityDashboard({
               <>
                 {' '}
                 · scanned{' '}
-                {new Date(report.generatedAt).toLocaleString()} via {report.toolVersions.scanner}
+                {new Date(report.generatedAt).toLocaleString()}
+                {report.toolVersions.scanner === 'npm audit' ? (
+                  <> via {report.toolVersions.scanner}</>
+                ) : null}
               </>
             ) : null}
           </p>

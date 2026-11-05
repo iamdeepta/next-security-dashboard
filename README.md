@@ -137,6 +137,7 @@ export const GET = createSecurityHandler({
   auditTimeoutMs: 120_000,   // timeout for `npm audit`
   enableOsvFallback: false,  // OFF by default; opt in to fall back to a vulnerability database when npm audit fails
   enableSafeUpgradeLookup: true, // list every safe upgrade version (registry lookup)
+  includeNotices: false,     // OFF by default; opt in to show the scan notice banner (e.g. when npm audit fails and the fallback is used)
   appRoot: process.cwd(),    // app root to scan
   authorize: (req) =>        // OPTIONAL but recommended in production
     req.headers.get('x-admin-secret') === process.env.ADMIN_SECRET,
@@ -187,7 +188,13 @@ is passed and `npm audit` fails or is unavailable, the scanner queries the
 OSV.dev `querybatch` API once per installed `package@version` (which returns
 only vulnerability IDs), then fetches the full record for each ID (`/v1/vulns/{id}`) to read the summary,
 severity, SEMVER `introduced`/`fixed` events, and aliases, and recommends
-the smallest fixed version above the installed one. Severity comes from the
+the smallest fixed version above the installed one. The dashboard header
+no longer names the fallback source in the "scanned … via …" line. When
+audit fails and the fallback is used, the report carries an advisory
+notice — but it is only shown as a banner when the handler is created
+with `includeNotices: true`; by default the banner is hidden. A total scan
+failure (both audit and fallback failing) is always reported, so a failed
+scan never looks like a clean one. Severity comes from the
 record's `database_specific.severity` when present, otherwise from a CVSS
 3.1 base-score computed from the vector. Requests use global `fetch`, with
 a `curl` fallback for proxied environments where Node's fetch cannot reach
@@ -196,9 +203,9 @@ carries a structured `error: { code: 'SCAN_FAILED', message, detail }` and
 the UI shows a retry state instead of pretending the app is clean.
 
 **When `npm audit` cannot run.** With the fallback off, an unusable audit
-result no longer reports a bare "did not return usable data": the notice
-names the underlying reason and the UI shows npm's own error text beside
-it. The common reasons are a missing `package-lock.json` (`npm audit`
+result no longer reports a bare "did not return usable data": the report's
+error names the underlying reason and npm's own error text is kept beside
+it (shown in the UI as a banner only when `includeNotices: true`). The common reasons are a missing `package-lock.json` (`npm audit`
 needs one — run `npm install`, or pass `enableOsvFallback: true`), the
 audit timing out (`auditTimeoutMs`, default 120s), a registry login or
 network failure, and an old npm (<= 6) audit format, which is parsed
