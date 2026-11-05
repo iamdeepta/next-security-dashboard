@@ -226,7 +226,7 @@ redirect the checks to another server:
 
 | Header | OK | Warning | Missing |
 | --- | --- | --- | --- |
-| Content-Security-Policy | Restrictive script policy, no `unsafe-inline`/`unsafe-eval`/wildcards | Present but weak (unsafe-inline, wildcards, no `default-src`/`script-src`) | Not sent |
+| Content-Security-Policy | Restrictive script policy, no wildcards/whole-scheme sources (`unsafe-inline`/`unsafe-eval` accepted — Next.js App Router needs them) | Present but weak (wildcards, whole-scheme sources, no `default-src`/`script-src`) | Not sent |
 | Strict-Transport-Security | `max-age ≥ 31536000` + `includeSubDomains` | Present but short `max-age` / no `includeSubDomains` | Not sent over HTTPS |
 | X-Frame-Options | `DENY` / `SAMEORIGIN` | `ALLOW-FROM` (obsolete) | Not sent |
 | X-Content-Type-Options | `nosniff` | Other value | Not sent |

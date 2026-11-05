@@ -1186,7 +1186,7 @@ export async function scanDependencies(
     appName,
     appRoot,
     source,
-    toolVersions: { node: process.version, scanner: source === 'osv' ? 'fallback vulnerability database' : 'npm audit' },
+    toolVersions: { node: process.version, scanner: source === 'osv' ? 'fallback vulnerability database' : source === 'npm-audit' ? 'npm audit' : 'scan unavailable' },
     packages,
     vulnerabilities: vulnerabilities.sort(
       (a, b) =>
