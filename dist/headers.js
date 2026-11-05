@@ -7,14 +7,16 @@ const nextConfig = {
       {
         source: '/(.*)',
         headers: [
-          { key: 'KEY', value: 'VALUE' },
+          { key: KEY, value: VALUE },
         ],
       },
     ];
   },
 };`;
 function snippet(key, value) {
-    return HEADER_FIX_INTRO.replace('KEY', key).replace('VALUE', value);
+    // JSON.stringify so values containing quotes (e.g. CSP's 'self') stay
+    // valid JavaScript instead of terminating the string literal early.
+    return HEADER_FIX_INTRO.replace('KEY', JSON.stringify(key)).replace('VALUE', JSON.stringify(value));
 }
 function get(headers, name) {
     const value = headers.get(name);
