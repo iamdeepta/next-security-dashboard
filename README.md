@@ -255,8 +255,10 @@ console.log(report.counts, report.vulnerabilities[0]?.safeUpgradeOptions);
 route handler, which passes the request origin) checks the app itself:
 
 **Static source scan** (up to 400 source files under the app root, excluding
-`node_modules`, `.next`, `dist` and `public`). Each pattern is a heuristic —
-review every finding before changing code:
+`node_modules`, `.next`, `dist` and `public`). Comments are ignored — a
+commented-out `document.write` or `eval` is not reported — and `//` inside
+string literals and URLs is never mistaken for a comment. Each pattern is a
+heuristic — review every finding before changing code:
 
 | Check | What it flags |
 | --- | --- |

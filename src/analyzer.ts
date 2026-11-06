@@ -41,6 +41,169 @@ interface SourceFile {
   rel: string;
   text: string;
   lines: string[];
+  /** Source with comments blanked out (same length/offsets — see stripComments). */
+  code: string;
+}
+
+/**
+ * Strip // line comments and /* ... *\/ block comments from JS/TS source,
+ * replacing each comment character with a space (newlines are kept) so the
+ * offsets and line numbers of the remaining code do not move. String
+ * literals ('...', "...", `...`) and regex literals are respected, so a //
+ * inside a URL string never starts a comment, and a commented-out dangerous
+ * call is never reported as an issue. JSX comments ({/* ... *\/}) are block
+ * comments and are stripped too.
+ *
+ * Two deliberate trade-offs, both fail-safe in the same direction (a missed
+ * finding, never a false one): a quote that opens a string is only
+ * recognised in an expression position, so an apostrophe in JSX text (don't)
+ * is not mistaken for a string; and comments inside a template literal's
+ * ${ ... } interpolation are not stripped.
+ */
+function stripComments(text: string): string {
+  const out = text.split('');
+  const n = text.length;
+
+  // True when the character at pos starts an expression — i.e. a quote
+  // there opens a string literal and a / there opens a regex literal,
+  // rather than the quote being JSX text (don't) or the / being division.
+  const isExpressionStart = (pos: number): boolean => {
+    let j = pos - 1;
+    while (j >= 0 && /\s/.test(text[j])) j -= 1;
+    if (j < 0) return true;
+    const prev = text[j];
+    if ('(,=:[!&|?{};+-*%<>^~'.includes(prev)) return true;
+    if (prev === '/') return false; // a / b / c — division, not a regex
+    if (/[A-Za-z_$]/.test(prev)) {
+      let k = j;
+      while (k >= 0 && /[A-Za-z0-9_$]/.test(text[k])) k -= 1;
+      const word = text.slice(k + 1, j + 1);
+      return (
+        word === 'return' ||
+        word === 'typeof' ||
+        word === 'case' ||
+        word === 'delete' ||
+        word === 'void' ||
+        word === 'in' ||
+        word === 'of' ||
+        word === 'new' ||
+        word === 'throw' ||
+        word === 'yield' ||
+        word === 'await' ||
+        word === 'instanceof' ||
+        word === 'else' ||
+        word === 'do'
+      );
+    }
+    return false;
+  };
+
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if ((ch === "'" || ch === '"') && isExpressionStart(i)) {
+      const quote = ch;
+      i += 1;
+      while (i < n) {
+        if (text[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (text[i] === quote) {
+          i += 1;
+          break;
+        }
+        if (text[i] === '\n') break; // unterminated string — bail out
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === '`' && isExpressionStart(i)) {
+      // Template literal: treated as opaque text, so // inside it never
+      // starts a comment.
+      i += 1;
+      while (i < n) {
+        if (text[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (text[i] === '`') {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === '/' && i + 1 < n && text[i + 1] === '/') {
+      // A :// sequence is a URL scheme (https://...), not a comment —
+      // e.g. a URL written in JSX text. In real code a URL sits inside a
+      // string (handled above); a :// outside a string is JSX text.
+      let k = i - 2;
+      while (k >= 0 && /[A-Za-z0-9+.-]/.test(text[k])) k -= 1;
+      const wordBefore = i >= 2 ? text.slice(k + 1, i - 1) : '';
+      if (
+        text[i - 1] === ':' &&
+        (wordBefore === 'http' ||
+          wordBefore === 'https' ||
+          wordBefore === 'ftp' ||
+          wordBefore === 'ws' ||
+          wordBefore === 'wss')
+      ) {
+        i += 2;
+        continue;
+      }
+      // Line comment: blank it out up to (not including) the newline.
+      out[i] = ' ';
+      out[i + 1] = ' ';
+      i += 2;
+      while (i < n && text[i] !== '\n') {
+        out[i] = ' ';
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === '/' && i + 1 < n && text[i + 1] === '*') {
+      // Block comment: blank it out, keeping newlines so line numbers hold.
+      out[i] = ' ';
+      out[i + 1] = ' ';
+      i += 2;
+      while (i < n && !(text[i] === '*' && i + 1 < n && text[i + 1] === '/')) {
+        if (text[i] !== '\n') out[i] = ' ';
+        i += 1;
+      }
+      if (i < n) {
+        out[i] = ' ';
+        out[i + 1] = ' ';
+        i += 2;
+      }
+      continue;
+    }
+    if (ch === '/' && isExpressionStart(i)) {
+      // Regex literal: consume it so // or /* inside it is not mistaken
+      // for a comment.
+      i += 1;
+      let inClass = false;
+      while (i < n) {
+        if (text[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (text[i] === '\n') break;
+        if (text[i] === '[') inClass = true;
+        else if (text[i] === ']') inClass = false;
+        else if (text[i] === '/' && !inClass) {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      while (i < n && /[a-z]/i.test(text[i])) i += 1; // flags
+      continue;
+    }
+    i += 1;
+  }
+  return out.join('');
 }
 
 function lineOf(text: string, index: number): number {
@@ -91,7 +254,7 @@ async function collectSourceFiles(appRoot: string): Promise<SourceFile[]> {
       }
       if (text.includes('\0')) continue; // binary
       const rel = path.relative(appRoot, full).split(path.sep).join('/');
-      out.push({ rel, text, lines: text.split('\n') });
+      out.push({ rel, text, lines: text.split('\n'), code: stripComments(text) });
     }
   }
   return out;
@@ -192,8 +355,11 @@ function findSimpleLocations(
   const out: AppCheckLocation[] = [];
   const re = new RegExp(regex.source, regex.flags);
   let match: RegExpExecArray | null;
-  while ((match = re.exec(file.text)) !== null) {
-    const line = lineOf(file.text, match.index);
+  // Match against the comment-stripped text so commented-out code is never
+  // reported; offsets are unchanged, so line numbers still line up and the
+  // snippet below is taken from the original line.
+  while ((match = re.exec(file.code)) !== null) {
+    const line = lineOf(file.code, match.index);
     out.push(loc(file.rel, file.lines, line));
     if (match[0].length === 0) re.lastIndex += 1;
   }
@@ -205,12 +371,12 @@ function findUnsafeCookieSets(file: SourceFile): AppCheckLocation[] {
   const out: AppCheckLocation[] = [];
   const re = /cookies\(\)\.set\(/g;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(file.text)) !== null) {
-    const window = file.text.slice(match.index, match.index + 400);
+  while ((match = re.exec(file.code)) !== null) {
+    const window = file.code.slice(match.index, match.index + 400);
     const hasHttpOnly = /httpOnly\s*:\s*true/i.test(window);
     const hasSecure = /secure\s*:\s*true/i.test(window);
     if (!hasHttpOnly || !hasSecure) {
-      const line = lineOf(file.text, match.index);
+      const line = lineOf(file.code, match.index);
       out.push(loc(file.rel, file.lines, line));
     }
   }
@@ -226,7 +392,9 @@ function checkPoweredByHeader(files: SourceFile[]): AppCheck {
     locations: [] as AppCheckLocation[],
   };
   const configs = files.filter((f) => /^next\.config\.(js|ts|mjs|cjs|mts|cts)$/.test(f.rel));
-  const disabled = configs.some((f) => /poweredByHeader\s*:\s*false/.test(f.text));
+  // Comment-stripped text: a commented-out `poweredByHeader: false` must
+  // not count as the header being disabled.
+  const disabled = configs.some((f) => /poweredByHeader\s*:\s*false/.test(f.code));
   if (disabled) {
     return {
       ...base,
